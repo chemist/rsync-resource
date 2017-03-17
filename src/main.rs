@@ -1,4 +1,5 @@
 extern crate rustc_serialize;
+extern crate time;
 
 //use rustc_serialize::json;
 use std::io;
@@ -33,7 +34,6 @@ pub struct Version {
 #[derive(RustcDecodable,RustcEncodable,Debug)]
 pub struct Params {
     static_version: Option<String>,
-    skip_download: Option<bool>,
     identificator: String,
 }
 
@@ -46,7 +46,7 @@ impl fmt::Display for Version {
 #[derive(RustcDecodable,RustcEncodable,Debug)]
 pub struct Resource {
     source: Source,
-    version: Version,
+    version: Option<Version>,
     params: Params,
 }
 
@@ -68,7 +68,32 @@ fn main() {
 
 fn concourse_out() {
     log!("Run out");
+    let source = env::args().nth(1)
+        .expect("Can't get source");
+    log!("Source folder: {}", source);
+    let mut stdin = String :: new();
+    io::stdin().read_to_string(&mut stdin)
+        .expect("Can't read stdin");
+    let resource: Resource = json::decode(&stdin)
+        .expect("Can't decode json from stdin");
+    let now = time::now();
+    let version = match resource.params.static_version {
+        Some(v) => format!("{}-{}",resource.params.identificator, v),
+        _ => format!("{}-{}", resource.params.identificator, now.rfc3339()),
+    };
+    let uri: String = format!("rsync://{}/{}/{}/", resource.source.server, resource.source.base_dir, version);
+    let source_folder = format!("{}/",source);
+    log!("{}",uri);
+    let rsync = Command::new("rsync")
+        .arg("-av")
+        .arg(source_folder)
+        .arg(uri)
+        .output()
+        .expect("Can't push files to rsync server");
+    log!("Output: {}\nErrors: {}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr));
+    println!("{}", json::encode(&version).expect("Can't encode output version"));
 }
+
 fn concourse_in() {
     log!("Run in");
     let destination = env::args().nth(1)
@@ -79,16 +104,17 @@ fn concourse_in() {
         .expect("Can't read stdin");
     let resource: Resource = json::decode(&stdin)
         .expect("Can't decode json from stdin");
-    let uri: String = format!("rsync://{}/{}/{}/",resource.source.server, resource.source.base_dir, resource.version.version);
+    let version = resource.version.expect("Don't find version in input");
+    let uri: String = format!("rsync://{}/{}/{}/",resource.source.server, resource.source.base_dir, &version.version);
     log!("Uri: {}", uri);
-    let copy = Command::new("rsync")
+    let rsync = Command::new("rsync")
         .arg("-av")
         .arg(uri)
         .arg(destination)
         .output()
-        .expect("Can't copy files from rsync server");
-    log!("Output: {}\nErrors: {}", String::from_utf8_lossy(&copy.stdout), String::from_utf8_lossy(&copy.stderr));
-    println!("{}", json::encode(&resource.version).expect("Can't encode input version"));
+        .expect("Can't pool files from rsync server");
+    log!("Output: {}\nErrors: {}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr));
+    println!("{}", json::encode(&version).expect("Can't encode input version"));
 }
 
 
@@ -104,7 +130,7 @@ fn concourse_check() {
         .arg(uri)
         .output()
         .expect("Can't get listing from rsync server");
-    let result = get_versions(&ls, &resource.version.version[0..4]);
+    let result = get_versions(&ls, &resource.version.expect("Don't find version in input").version[0..4]);
     log!("rsync: {:?}", result);
     println!("{}",json::encode(&result).expect("Can't encode output versions"))
 }

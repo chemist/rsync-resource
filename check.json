@@ -5,8 +5,7 @@
   },
   "version": { "version": "static" },
   "params": { 
-      "static_version": "static",
-      "skip_download": true,
-      "identificator": "stat"
+      "static_version": "my-src",
+      "identificator": "rust"
   }
 }
