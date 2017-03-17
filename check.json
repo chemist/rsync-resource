@@ -3,5 +3,10 @@
     "server": "ci.internal",
     "base_dir": "bin"
   },
-  "version": { "data": "my_version_here" }
+  "version": { "version": "static" },
+  "params": { 
+      "static_version": "static",
+      "skip_download": true,
+      "identificator": "stat"
+  }
 }
