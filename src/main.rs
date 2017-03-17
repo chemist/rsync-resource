@@ -59,7 +59,7 @@ fn concourse_check() {
     let mut input = String :: new();
     io::stdin().read_to_string(&mut input)
         .expect("Failed to read input");
-    let check: Check = json::decode(&input).unwrap();
+    let check: Check = json::decode(&input).expect("cant decode json from input");
     log!("Input is: {:?}", check);
     let input: String = format!("rsync://{}/{}",check.source.server, check.source.base_dir);
     let rsync = Command::new("rsync")
@@ -74,9 +74,9 @@ fn concourse_check() {
 fn get_versions(rsync: &Output) -> Vec<Version> {
     let folders = String::from_utf8_lossy(&rsync.stdout);
     let mut result = Vec :: new();
-    for one in folders.lines() {
+    for line in folders.lines() {
         let ver = Version {
-            data: one.split_whitespace().last().expect("cant split str").to_string(),
+            data: line.split_whitespace().last().expect("cant split rsync line").to_string(),
         };
         if ver.data != "." {
             result.push(ver);
