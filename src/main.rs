@@ -74,6 +74,7 @@ fn concourse_out() {
     let mut stdin = String :: new();
     io::stdin().read_to_string(&mut stdin)
         .expect("Can't read stdin");
+    log!("{}", stdin);
     let resource: Resource = json::decode(&stdin)
         .expect("Can't decode json from stdin");
     let now = time::now();
@@ -102,6 +103,7 @@ fn concourse_in() {
     let mut stdin = String :: new();
     io::stdin().read_to_string(&mut stdin)
         .expect("Can't read stdin");
+    log!("{}", stdin);
     let resource: Resource = json::decode(&stdin)
         .expect("Can't decode json from stdin");
     let version = resource.version.expect("Don't find version in input");
@@ -123,6 +125,7 @@ fn concourse_check() {
     let mut stdin = String :: new();
     io::stdin().read_to_string(&mut stdin)
         .expect("Can't read stdin");
+    log!("{}", stdin);
     let resource: Resource = json::decode(&stdin).expect("cant decode json from stdin");
     log!("Input is: {:?}", resource);
     let uri: String = format!("rsync://{}/{}",resource.source.server, resource.source.base_dir);
