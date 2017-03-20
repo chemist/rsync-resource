@@ -130,19 +130,20 @@ fn concourse_check() {
         .arg(uri)
         .output()
         .expect("Can't get listing from rsync server");
-    let result = get_versions(&ls, &resource.version.expect("Don't find version in input").version[0..4]);
+    let version = &resource.version.expect("Don't find version in input").version;
+    let result = get_versions(&ls, &version[0..4], version);
     log!("rsync: {:?}", result);
     println!("{}",json::encode(&result).expect("Can't encode output versions"))
 }
 
-fn get_versions(rsync: &Output, mask: &str) -> Vec<Version> {
+fn get_versions(rsync: &Output, mask: &str, current_version: &str) -> Vec<Version> {
     let folders = String::from_utf8_lossy(&rsync.stdout);
     let mut result = Vec :: new();
     for line in folders.lines() {
         let ver = Version {
             version: line.split_whitespace().last().expect("cant split rsync line").to_string(),
         };
-        if ver.version != "." && &ver.version[0..4] == mask {
+        if ver.version != "." && &ver.version[0..4] == mask && ver.version >= current_version.to_string() {
             result.push(ver);
         }
     }
