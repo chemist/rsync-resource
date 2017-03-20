@@ -3,7 +3,7 @@
     "server": "ci.internal",
     "base_dir": "bin"
   },
-  "version": { "version": "static" },
+  "version": { "ref": "static" },
   "params": { 
       "static_version": "my-src",
       "identificator": "rust"

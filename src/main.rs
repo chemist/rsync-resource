@@ -1,15 +1,16 @@
 extern crate rustc_serialize;
 extern crate time;
 
-//use rustc_serialize::json;
 use std::io;
 use std::io::prelude::*;
 use std::fmt;
-use rustc_serialize::json::{self};
 use std::process::Command;
 use std::process::Output;
 use std::env;
 use std::path::Path;
+use rustc_serialize::json::{self, ToJson, Json};
+use rustc_serialize::{Decodable,Decoder};
+use std::collections::BTreeMap;
 
 macro_rules! log(
     ($($arg:tt)*) => { {
@@ -20,18 +21,35 @@ macro_rules! log(
 
 //Automatically generate `RustcDecodable` and `RustcEncodable` trait
 // implementations
-#[derive(RustcDecodable,RustcEncodable,Debug)]
+#[derive(RustcDecodable,Debug)]
 pub struct Source {
     server: String,
     base_dir: String,
 }
 
-#[derive(RustcDecodable,RustcEncodable,Debug,Ord,Eq,PartialEq,PartialOrd)]
+#[derive(Debug,Ord,Eq,PartialEq,PartialOrd)]
 pub struct Version {
     version: String,
 }
 
-#[derive(RustcDecodable,RustcEncodable,Debug)]
+impl ToJson for Version {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("ref".to_string(), self.version.to_json());
+        Json::Object(d)
+    }
+}
+
+impl Decodable for Version {
+    fn decode<D: Decoder>(d: &mut D) -> Result<Version, D::Error> {
+        d.read_struct("ref", 1, |d| {
+            let version = try!(d.read_struct_field("ref", 0, |d| { d.read_str()}));
+            Ok(Version{ version: version})
+        })
+    }
+}
+
+#[derive(RustcDecodable,Debug)]
 pub struct Params {
     static_version: Option<String>,
     identificator: String,
@@ -43,7 +61,7 @@ impl fmt::Display for Version {
     }
 }
 
-#[derive(RustcDecodable,RustcEncodable,Debug)]
+#[derive(RustcDecodable,Debug)]
 pub struct Resource {
     source: Source,
     version: Option<Version>,
@@ -92,7 +110,7 @@ fn concourse_out() {
         .output()
         .expect("Can't push files to rsync server");
     log!("Output: {}\nErrors: {}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr));
-    println!("{}", json::encode(&version).expect("Can't encode output version"));
+    println!("{}", version.to_json().to_string()) 
 }
 
 fn concourse_in() {
@@ -116,7 +134,7 @@ fn concourse_in() {
         .output()
         .expect("Can't pool files from rsync server");
     log!("Output: {}\nErrors: {}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr));
-    println!("{}", json::encode(&version).expect("Can't encode input version"));
+    println!("{}", version.to_json().to_string()) 
 }
 
 
@@ -136,7 +154,7 @@ fn concourse_check() {
     let version = &resource.version.expect("Don't find version in input").version;
     let result = get_versions(&ls, &version[0..4], version);
     log!("rsync: {:?}", result);
-    println!("{}",json::encode(&result).expect("Can't encode output versions"))
+    println!("{}",result.to_json().to_string()) 
 }
 
 fn get_versions(rsync: &Output, mask: &str, current_version: &str) -> Vec<Version> {
