@@ -25,6 +25,7 @@ macro_rules! log(
 pub struct Source {
     server: String,
     base_dir: String,
+    static_identificator: Option<String>,
 }
 
 #[derive(Debug,Ord,Eq,PartialEq,PartialOrd)]
@@ -52,7 +53,9 @@ impl Decodable for Version {
 #[derive(RustcDecodable,Debug)]
 pub struct Params {
     static_version: Option<String>,
-    identificator: String,
+    identificator: Option<String>,
+    sync_dir: Option<String>,
+    skip_download: Option<bool>,
 }
 
 impl fmt::Display for Version {
@@ -61,11 +64,23 @@ impl fmt::Display for Version {
     }
 }
 
+#[derive(Debug,Ord,Eq,PartialEq,PartialOrd)]
+pub struct Out {
+    version: Version
+}
+impl ToJson for Out {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("version".to_string(), self.version.to_json());
+        Json::Object(d)
+    }
+}
+
 #[derive(RustcDecodable,Debug)]
 pub struct Resource {
     source: Source,
     version: Option<Version>,
-    params: Params,
+    params: Option<Params>,
 }
 
 fn main() {
@@ -89,6 +104,9 @@ fn concourse_out() {
     let source = env::args().nth(1)
         .expect("Can't get source");
     log!("Source folder: {}", source);
+    for n in env::args() {
+      log!("Parameters: {:?}", n);
+    }
     let mut stdin = String :: new();
     io::stdin().read_to_string(&mut stdin)
         .expect("Can't read stdin");
@@ -96,21 +114,27 @@ fn concourse_out() {
     let resource: Resource = json::decode(&stdin)
         .expect("Can't decode json from stdin");
     let now = time::now();
-    let version = match resource.params.static_version {
-        Some(v) => format!("{}-{}",resource.params.identificator, v),
-        _ => format!("{}-{}", resource.params.identificator, now.rfc3339()),
-    };
-    let uri: String = format!("rsync://{}/{}/{}/", resource.source.server, resource.source.base_dir, version);
-    let source_folder = format!("{}/",source);
-    log!("{}",uri);
-    let rsync = Command::new("rsync")
-        .arg("-av")
-        .arg(source_folder)
-        .arg(uri)
-        .output()
-        .expect("Can't push files to rsync server");
-    log!("Output: {}\nErrors: {}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr));
-    println!("{}", version.to_json().to_string()) 
+    match resource.params {
+        Some(params) => {
+           let version = match params.static_version {
+               Some(v) => format!("{}-{}",params.identificator.expect("identificator must be"), v),
+               _ => format!("{}-{}", params.identificator.expect("identificator must be"), now.rfc3339()),
+           };
+           let uri: String = format!("rsync://{}/{}/{}/", resource.source.server, resource.source.base_dir, version);
+           let source_folder = format!("{}/{}/", source, params.sync_dir.expect("sync_dir must be"));
+           log!("{}",uri);
+           let rsync = Command::new("rsync")
+               .arg("-av")
+               .arg(source_folder)
+               .arg(uri)
+               .output()
+               .expect("Can't push files to rsync server");
+           let out = Out { version: Version { version: version} };
+           log!("Output: {}\nErrors: {}\nList: {:?}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr), out);
+           println!("{}", out.to_json().to_string()) 
+        },
+        _ => println!("{}", "{}")
+    }
 }
 
 fn concourse_in() {
@@ -124,20 +148,37 @@ fn concourse_in() {
     log!("{}", stdin);
     let resource: Resource = json::decode(&stdin)
         .expect("Can't decode json from stdin");
-    let version = resource.version.expect("Don't find version in input");
-    let uri: String = format!("rsync://{}/{}/{}/",resource.source.server, resource.source.base_dir, &version.version);
-    log!("Uri: {}", uri);
-    let rsync = Command::new("rsync")
-        .arg("-av")
-        .arg(uri)
-        .arg(destination)
-        .output()
-        .expect("Can't pool files from rsync server");
-    log!("Output: {}\nErrors: {}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr));
-    println!("{}", version.to_json().to_string()) 
+    let skip = match resource.params {
+        Some(p) => match p.skip_download {
+            Some(a) => a,
+            None => false
+        },
+        _ => false
+    };
+    if skip {
+        log!("Skip");
+        println!("{}", "{}")
+    } else {
+      let version = resource.version.expect("Can't find input version").version;
+      let uri: String = format!("rsync://{}/{}/{}/",resource.source.server, resource.source.base_dir, &version);
+      log!("Uri: {}", uri);
+      let rsync = Command::new("rsync")
+          .arg("-av")
+          .arg(uri)
+          .arg(destination)
+          .output()
+          .expect("Can't pool files from rsync server");
+      let out = Out { version: Version { version: version} };
+      log!("Output: {}\nErrors: {}\nList: {:?}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr), out);
+      println!("{}", out.to_json().to_string()) 
+    }
 }
 
-
+// if resource used as input only
+// it has only resource.source as json on input
+// if resource used as output only
+// it has resource.source
+//        resource.params
 fn concourse_check() {
     log!("Run check");
     let mut stdin = String :: new();
@@ -151,10 +192,20 @@ fn concourse_check() {
         .arg(uri)
         .output()
         .expect("Can't get listing from rsync server");
-    let version = &resource.version.expect("Don't find version in input").version;
-    let result = get_versions(&ls, &version[0..4], version);
-    log!("rsync: {:?}", result);
-    println!("{}",result.to_json().to_string()) 
+    match (resource.version, resource.source.static_identificator) {
+        (Some(v), _)  => {
+            let version = v.version;
+            let result = get_versions(&ls, &version[0..4], &version);
+            log!("rsync: {:?}", result);
+            println!("{}",result.to_json()) 
+        },
+        (None, Some(si)) => {
+            let result = get_versions(&ls, &si[0..4], &si);
+            log!("rsync: {:?}", result);
+            println!("{}", result.to_json())
+        }
+        _ => panic!("What to do?")
+    }
 }
 
 fn get_versions(rsync: &Output, mask: &str, current_version: &str) -> Vec<Version> {
