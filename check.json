@@ -1,11 +1,9 @@
 {
   "source": {
     "server": "ci.internal",
-    "base_dir": "bin"
-  },
-  "version": { "ref": "static" },
-  "params": { 
-      "static_version": "my-src",
-      "identificator": "rust"
+    "base_dir": "static",
+    "static_identificator": "input",
+    "resource_type": "r"
+
   }
 }
