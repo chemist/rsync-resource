@@ -5,11 +5,11 @@ use std::io;
 use std::io::prelude::*;
 use std::fmt;
 use std::process::Command;
-use std::process::Output;
 use std::env;
+use std::borrow::Cow;
 use std::path::Path;
 use rustc_serialize::json::{self, ToJson, Json};
-use rustc_serialize::{Decodable,Decoder};
+use rustc_serialize::{Decodable, Decoder};
 use std::collections::BTreeMap;
 
 macro_rules! log(
@@ -20,20 +20,28 @@ macro_rules! log(
 );
 
 
-#[derive(RustcDecodable,Debug)]
-pub struct Source {
-    server: String,
-    base_dir: String,
-    static_identificator: Option<String>,
-    resource_type: String,
+#[derive(RustcDecodable,Debug,Clone)]
+struct Source<'a> {
+    server: Cow<'a, str>,
+    base_dir: Cow<'a, str>,
+    static_identificator: Option<Cow<'a, str>>,
+    resource_type: Cow<'a, str>
 }
 
-#[derive(Debug,Ord,Eq,PartialEq,PartialOrd)]
-pub struct Version {
-    version: String,
+#[derive(Debug,Ord,Eq,PartialEq,PartialOrd,Clone)]
+struct Version<'a> {
+    version: Cow<'a, str>,
 }
 
-impl ToJson for Version {
+impl <'a> Version<'a> {
+    fn new<S> (version: S) -> Version<'a>
+        where S: Into<Cow<'a, str>>
+    {
+        Version { version: version.into() }
+    }
+}
+
+impl <'a> ToJson for Version<'a> {
     fn to_json(&self) -> Json {
         let mut d = BTreeMap::new();
         d.insert("ref".to_string(), self.version.to_json());
@@ -41,174 +49,168 @@ impl ToJson for Version {
     }
 }
 
-impl Decodable for Version {
-    fn decode<D: Decoder>(d: &mut D) -> Result<Version, D::Error> {
+impl <'a, 'b>Decodable for Version<'a> {
+    fn decode<D: Decoder>(d: &mut D) -> Result<Version<'a>, D::Error> {
         d.read_struct("ref", 1, |d| {
-            let version = try!(d.read_struct_field("ref", 0, |d| { d.read_str()}));
-            Ok(Version{ version: version})
+            let version = try!(d.read_struct_field("ref", 0, |d| d.read_str()));
+            Ok(Version::new(version))
         })
     }
 }
 
-#[derive(RustcDecodable,Debug)]
-pub struct Params {
-    identificator: Option<String>,
-    sync_dir: Option<String>,
+#[derive(RustcDecodable,Debug,Clone)]
+struct Params<'a> {
+    identificator: Option<Cow<'a, str>>,
+    sync_dir: Option<Cow<'a, str>>,
 }
 
-impl fmt::Display for Version {
+impl <'a> fmt::Display for Version<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ref: {}", self.version)
     }
 }
 
-#[derive(Debug,Ord,Eq,PartialEq,PartialOrd)]
-enum Out {
-    One(Version) ,
-    Many(Vec<Version>),
+#[derive(Debug,Ord,Eq,PartialEq,PartialOrd,Clone)]
+enum Out<'a> {
+    One(Version<'a>),
+    Many(Vec<Version<'a>>),
     Empty,
 }
 
-impl ToJson for Out {
+impl <'a> ToJson for Out<'a> {
     fn to_json(&self) -> Json {
         match self {
             &Out::Empty => Json::Object(BTreeMap::new()),
             &Out::One(ref v) => {
                 let mut d = BTreeMap::new();
-                d.insert("version".to_string(),v.to_json());
+                d.insert("version".to_string(), v.to_json());
                 Json::Object(d)
-            },
-            &Out::Many(ref v) => {
-                v.to_json()
             }
+            &Out::Many(ref v) => v.to_json(),
         }
     }
 }
 
-#[derive(RustcDecodable,Debug)]
-pub struct Resource {
-    source: Source,
-    version: Option<Version>,
-    params: Option<Params>,
+#[derive(RustcDecodable,Debug,Clone)]
+struct Resource<'a> {
+    source: Cow<'a, Source<'a>>,
+    version: Option<Cow<'a, Version<'a>>>,
+    params: Option<Cow<'a, Params<'a>>>,
 }
 
 fn main() {
-    let zero: String = env::args().nth(0)
-        .expect("Can't get env");
-    let bin_name = Path::new(&zero).file_stem()
+    let zero: String = env::args().nth(0).expect("Can't get env");
+    let bin_name = Path::new(&zero)
+        .file_stem()
         .expect("Can't get binary name")
         .to_str()
         .expect("Can't convert bin name");
     let source: String = if bin_name != "check" {
-        env::args().nth(1)
-            .expect("Can't get env")
-    } else { "".to_string() };
-    log!("Name: {}", bin_name);
-    let mut stdin = String :: new();
-    io::stdin().read_to_string(&mut stdin)
-        .expect("Can't read stdin");
-    log!("{}", stdin);
-    let resource: Resource = json::decode(&stdin)
-        .expect("Can't decode json from stdin");
-    let out = match bin_name.as_ref() {
-        "out" => concourse_out(source, resource),
-        "in" => concourse_in(source, resource),
-        "check" => concourse_check(source, resource),
-        _ => Out::Empty
+        env::args().nth(1).expect("Can't get env")
+    } else {
+        "".to_string()
     };
-    //println!("{}", out.to_json().to_string()) 
-    println!("{}", out.to_json().to_string()) 
+    log!("Name: {}", bin_name);
+    let mut stdin = String::new();
+    io::stdin().read_to_string(&mut stdin).expect("Can't read stdin");
+    log!("{}", stdin);
+    let resource: Resource = json::decode(&stdin).expect("Can't decode json from stdin");
+    let out = match bin_name.as_ref() {
+        "out" => concourse_out(&source, &resource),
+        "in" => concourse_in(&source, &resource),
+        "check" => concourse_check(&resource),
+        _ => Out::Empty,
+    };
+    //println!("{}", out.to_json().to_string())
+    println!("{}", out.to_json().to_string())
 }
 
-fn concourse_out(source: String, resource: Resource) -> Out {
+fn concourse_out<'a>(source: &str, resource: &'a Resource) -> Out<'a> {
     log!("Run out");
     let now = time::now();
-    let params = resource.params
-        .expect("Can't find params");
-    let version = if resource.source.resource_type == "w" && resource.source.static_identificator != None {
-        resource.source.static_identificator.unwrap()
+    let params = resource.params.clone().expect("Can't find params");
+    let version: String = if resource.source.resource_type == Cow::from("w") &&
+                     resource.source.static_identificator != None {
+        resource.source.static_identificator.clone().unwrap().to_string()
     } else {
-        format!("{}-{}", params.identificator.expect("identificator must be"), now.rfc3339())
+        format!("{}-{}",
+                params.identificator.clone().expect("identificator must be"),
+                now.rfc3339())
     };
-    let uri: String = format!("rsync://{}/{}/{}/", resource.source.server, resource.source.base_dir, version);
-    let source_folder = format!("{}/{}/", source, params.sync_dir.expect("sync_dir must be"));
-    log!("{}",uri);
+    let uri: String = format!("rsync://{}/{}/{}/",
+                              resource.source.server,
+                              resource.source.base_dir,
+                              version);
+    let source_folder = format!("{}/{}/", source, params.sync_dir.clone().expect("sync_dir must be"));
+    log!("{}", uri);
     let rsync = Command::new("rsync")
         .arg("-av")
         .arg(source_folder)
         .arg(uri)
         .output()
         .expect("Can't push files to rsync server");
-    let out = Out::One(Version { version: version});
-    log!("Output: {}\nErrors: {}\nList: {:?}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr), out);
-    return out
+    let out = Out::One(Version::new(version));
+    log!("Output: {}\nErrors: {}\nList: {:?}",
+         String::from_utf8_lossy(&rsync.stdout),
+         String::from_utf8_lossy(&rsync.stderr),
+         out);
+    return out;
 
 }
 
-fn concourse_in(source: String, resource: Resource) -> Out {
+fn concourse_in<'a>(source: &String, resource: &'a Resource) -> Out<'a> {
     log!("Run in");
-    let resouce_type = resource.source.resource_type;
+    let resouce_type = resource.source.resource_type.clone();
     if resouce_type == "w" {
         log!("Skip, write only");
-        return Out::Empty 
+        return Out::Empty;
     } else {
-      let version = resource.version.expect("Can't find input version").version;
-      let uri: String = format!("rsync://{}/{}/{}/",resource.source.server, resource.source.base_dir, &version);
-      log!("Uri: {}", uri);
-      let rsync = Command::new("rsync")
-          .arg("-av")
-          .arg(uri)
-          .arg(source)
-          .output()
-          .expect("Can't pool files from rsync server");
-      let out = Out::One(Version { version: version});
-      log!("Output: {}\nErrors: {}\nList: {:?}", String::from_utf8_lossy(&rsync.stdout), String::from_utf8_lossy(&rsync.stderr), out);
-      return out
+        let version = resource.version.clone().expect("Can't find input version").version.clone();
+        let uri: String = format!("rsync://{}/{}/{}/",
+                                  resource.source.server,
+                                  resource.source.base_dir,
+                                  &version);
+        log!("Uri: {}", uri);
+        let rsync = Command::new("rsync")
+            .arg("-av")
+            .arg(uri)
+            .arg(source)
+            .output()
+            .expect("Can't pool files from rsync server");
+        let out = Out::One(Version::new(version));
+        log!("Output: {}\nErrors: {}\nList: {:?}",
+             String::from_utf8_lossy(&rsync.stdout),
+             String::from_utf8_lossy(&rsync.stderr),
+             out);
+        return out;
     }
 }
+//
+//// if resource used as input only
+//// it has only resource.source as json on input
+//// if resource used as output only
+//// it has resource.source
+////        resource.params
 
-// if resource used as input only
-// it has only resource.source as json on input
-// if resource used as output only
-// it has resource.source
-//        resource.params
-fn concourse_check(_: String, resource: Resource) -> Out {
+fn concourse_check<'a>(resource: &'a Resource) -> Out<'a> {
     log!("Run check");
-    let uri: String = format!("rsync://{}/{}",resource.source.server, resource.source.base_dir);
-    let ls = Command::new("rsync")
-        .arg(uri)
-        .output()
-        .expect("Can't get listing from rsync server");
-    match (resource.version, resource.source.static_identificator) {
-        (Some(v), _)  => {
-            let version = v.version;
-            let result = get_versions(&ls, &version[0..4], &version);
-            log!("Have version");
-            log!("rsync: {:?}", result);
-            return Out::Many(result)
-        },
-        (None, Some(si)) => {
-            let result = get_versions(&ls, &si[0..4], &si);
-            log!("Dont have version");
-            log!("rsync: {:?}", result);
-            return Out::Many(result)
-        }
-        _ => Out::Empty
-    }
-}
-
-fn get_versions(rsync: &Output, mask: &str, current_version: &str) -> Vec<Version> {
-    let folders = String::from_utf8_lossy(&rsync.stdout);
-    let mut result = Vec :: new();
+    let mut result: Vec<Version> = Vec::new();
+    let uri: String = format!("rsync://{}/{}",
+                              resource.source.server,
+                              resource.source.base_dir);
+    let (mask, version): (String, String) = match (resource.version.clone(), resource.source.static_identificator.clone()) {
+        (Some(v), _) => (v.version[0..4].to_string(), v.version.to_string()),
+        (None, Some(v)) => (v[0..4].to_string(), v.to_string()),
+        _ => panic!("Can't find static_identificator or version"),
+    };
+    let ls = Command::new("rsync").arg(uri).output().expect("Can't get listing from rsync server");
+    let folders = String::from_utf8(ls.stdout).expect("Check filesystem, bad utf8");
     for line in folders.lines() {
-        let ver = Version {
-            version: line.split_whitespace().last().expect("cant split rsync line").to_string(),
-        };
-        if ver.version != "." && &ver.version[0..4] == mask && ver.version >= current_version.to_string() {
-            result.push(ver);
+        let folder: &str = line.split_whitespace().last().expect("Can't split rsync lline");
+        if folder != ".".to_string() && folder[0..4] == mask && folder.to_string() >= version {
+            result.push(Version::new(folder.to_string()));
         }
     }
     result.sort();
-    return result;
+    return Out::Many(result)
 }
-

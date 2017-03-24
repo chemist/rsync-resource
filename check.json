@@ -5,5 +5,6 @@
     "static_identificator": "input",
     "resource_type": "r"
 
-  }
+  },
+  "version": { "ref": "input" }
 }
