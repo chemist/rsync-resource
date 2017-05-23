@@ -2,9 +2,8 @@
   "source": {
     "server": "ci.internal",
     "base_dir": "static",
-    "static_identificator": "input",
-    "resource_type": "r"
+    "resource_type": "rw"
 
   },
-  "version": { "ref": "input" }
+  "version": { "ref": "input-prod" }
 }
