@@ -1,4 +1,8 @@
-##Rsyncd settings
+# rsync resource for concourse
+If you need resource for moving artifacts between your jobs it's right place.
+
+
+## Rsyncd settings
 
 Some thing like this
 ```
@@ -34,7 +38,7 @@ hosts deny = *
 # mkdir -p /opt/rsync/static
 #
 ```
-###Example
+### Example
 
 ``` yaml
 resource_types: ###################################################################################################
@@ -94,4 +98,5 @@ resources: #####################################################################
 # it checks new files in folder /opt/rsync/static/input-prod
 
 ```
+Also you can see example in test.yml included here.
 
